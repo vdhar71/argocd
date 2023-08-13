@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: gradlepc
+  name: gradle-petclinic
+  labels:
+    app: gradle-petclinic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gradle-petclinic
+  template:
+    metadata:
+      labels:
+        app: gradle-petclinic
+    spec:
+      containers:
+      - name: gradle-petclinic
+        image: vdhar/gradle-petclinic:replaceImageTag
+        ports:
+        - containerPort: 8080
