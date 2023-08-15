@@ -1,0 +1,78 @@
+pipeline {
+    agent any
+    
+    environment {
+        IMG_VER = 1
+        dockerCredentials = 'dockerhub'
+	    GIT_REPO_NAME = 'gradle-petclinic'
+	    GIT_USER_NAME = 'vdhar71'
+	    gitcreds = 'github'
+	    GIT_SRC = 'https://github.com/vdhar71/gradle-petclinic'
+	    GIT_DST = 'https://github.com/vdhar71/argocd'
+        PATH='/bin:/usr/bin:/usr/local/bin:/sbin:/usr/sbin'
+    }
+
+    stages {
+        stage('Checkout repos and build') {
+            steps {
+                // Check out source and destination repositories
+                sh 'echo Check out source and destination repositories'
+                sh 'env'
+                // Docker login to use trivy
+                withCredentials([usernamePassword(credentialsId: dockerCredentials, passwordVariable: 'password', usernameVariable: 'username')]) {
+                        sh '/usr/local/bin/docker login -u $username -p $password'
+                }
+                // Trivy scan before git checkout
+                sh '/opt/homebrew/bin/trivy repo https://github.com/vdhar71/gradle-petclinic.git --scanners vuln,secret,config,license --dependency-tree'
+                
+                checkout scmGit(branches: [
+                    [name: '*/main']
+                    ], 
+                    extensions: [cleanBeforeCheckout(deleteUntrackedNestedRepositories: true)], 
+                    userRemoteConfigs: [
+                        [url: 'https://github.com/vdhar71/gradle-petclinic']
+                    ]
+                )
+                
+                sh './gradlew build'
+                
+                // Trivy scan after app is built
+                sh '/opt/homebrew/bin/trivy fs . --scanners vuln,secret,config,license --dependency-tree'
+            }
+            post {
+                // If Gradle was able to run the tests, even if some of the test
+                // failed, record the test results and archive the jar file.
+                success {
+                    archiveArtifacts 'build/libs//*.jar'
+                    // Build the Docker image from the resulting jar
+                    sh '/usr/local/bin/docker build -t vdhar/gradle-petclinic:${IMG_VER}.${BUILD_NUMBER} .'
+                    
+                    // Trivy scan on the final artifact: Docker image
+                    sh '/opt/homebrew/bin/trivy image vdhar/gradle-petclinic:${IMG_VER}.${BUILD_NUMBER} --scanners vuln,secret,config,license --dependency-tree'
+
+                    sh '/usr/local/bin/docker push vdhar/gradle-petclinic:${IMG_VER}.${BUILD_NUMBER}'
+                
+                    checkout scmGit(branches: [
+                        [name: '*/main']
+                        ], 
+                        extensions: [cleanBeforeCheckout(deleteUntrackedNestedRepositories: true)], 
+                        userRemoteConfigs: [
+                            [url: 'https://github.com/vdhar71/argocd']
+                        ]
+                    )
+                    
+                    withCredentials([usernamePassword(credentialsId: gitcreds, passwordVariable: 'password', usernameVariable: 'username')]) {
+                        sh '''
+                            git config user.email "vidash@yahoo.com"
+                            git config user.name "Vidyadhar Chitradurga"
+                            sed -i '' -e "s/replaceImageTag/${IMG_VER}.${BUILD_NUMBER}/g" gradle-petclinic/deployment.yml
+                            git add gradle-petclinic/deployment.yml
+                            git commit -m "Updated image to match in Docker image ${BUILD_NUMBER}"
+                            git push https://github.com/vdhar71/argocd HEAD:main
+                        '''
+                    }
+                }
+            }
+        }
+    }
+}
