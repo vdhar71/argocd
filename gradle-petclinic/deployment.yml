@@ -17,6 +17,6 @@ spec:
     spec:
       containers:
       - name: gradle-petclinic
-        image: vdhar/gradle-petclinic:replaceImageTag
+        image: vdhar/gradle-petclinic:1.23
         ports:
         - containerPort: 8080
